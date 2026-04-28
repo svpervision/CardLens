@@ -3,11 +3,9 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   Dimensions,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -22,7 +20,6 @@ import { Colors, Fonts } from '../../constants/theme';
 import { PLACEHOLDER_ANALYSIS } from '../../constants/cardData';
 import { gradeCenteringFromPixels } from '../../constants/centeringAnalysis';
 import { CardIdentificationResult, identifyCard } from '../../constants/cardIdentification';
-import { getApiKey, saveApiKey } from '../../constants/config';
 import { saveCard } from '../../store/collection';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -46,14 +43,11 @@ export default function ScanScreen() {
   const [step, setStep] = useState<ScanStep>('front');
   const [frontUri, setFrontUri] = useState<string | null>(null);
   const [frontCentering, setFrontCentering] = useState<CenteringResult | null>(null);
-  const [showApiModal, setShowApiModal] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
   const cameraRef = useRef<CameraView>(null);
 
   const scanLineY = useSharedValue(0);
   const scanLineOpacity = useSharedValue(0);
 
-  // Capture refs so the async IIFE always sees up-to-date values
   const frontUriRef = useRef<string | null>(null);
   const frontCenteringRef = useRef<CenteringResult | null>(null);
   frontUriRef.current = frontUri;
@@ -76,12 +70,11 @@ export default function ScanScreen() {
     let cancelled = false;
 
     (async () => {
-      const apiKey = await getApiKey();
       const uri = frontUriRef.current;
 
       const identPromise: Promise<CardIdentificationResult | null> =
-        apiKey !== null && uri !== null
-          ? identifyCard(uri, apiKey).catch(() => null)
+        uri !== null
+          ? identifyCard(uri).catch(() => null)
           : Promise.resolve(null);
 
       const [identResult] = await Promise.all([
@@ -174,17 +167,6 @@ export default function ScanScreen() {
     setFrontCentering(null);
   }
 
-  async function openApiModal() {
-    const key = await getApiKey();
-    setApiKeyInput(key ?? '');
-    setShowApiModal(true);
-  }
-
-  async function saveApiKeyAndClose() {
-    await saveApiKey(apiKeyInput.trim());
-    setShowApiModal(false);
-  }
-
   const stepLabel =
     step === 'front'
       ? 'Align front of card'
@@ -199,14 +181,10 @@ export default function ScanScreen() {
       <View style={styles.vignette} pointerEvents="none" />
 
       <SafeAreaView style={styles.topBar} edges={['top']}>
-        <View style={{ width: 44 }} />
         <View style={styles.topBarCenter}>
           <Text style={styles.appName}>CardLens</Text>
           <Text style={styles.stepLabel}>{stepLabel}</Text>
         </View>
-        <Pressable style={styles.gearBtn} onPress={openApiModal}>
-          <Text style={styles.gearIcon}>⚙</Text>
-        </Pressable>
       </SafeAreaView>
 
       {/* card overlay frame */}
@@ -269,36 +247,6 @@ export default function ScanScreen() {
           <StepDot active={step === 'analyzing'} done={false} />
         </View>
       </SafeAreaView>
-
-      {/* API key settings modal */}
-      <Modal
-        visible={showApiModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowApiModal(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowApiModal(false)}>
-          <Pressable style={styles.apiModal} onPress={() => {}}>
-            <Text style={styles.apiModalTitle}>Anthropic API Key</Text>
-            <Text style={styles.apiModalLabel}>
-              Enter your Anthropic API key to enable AI card identification
-            </Text>
-            <TextInput
-              style={styles.apiKeyInput}
-              value={apiKeyInput}
-              onChangeText={setApiKeyInput}
-              secureTextEntry
-              placeholder="sk-ant-..."
-              placeholderTextColor={Colors.textSecondary}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <Pressable style={styles.saveBtn} onPress={saveApiKeyAndClose}>
-              <Text style={styles.saveBtnText}>Save</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   );
 }
@@ -393,13 +341,12 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingTop: 8,
     zIndex: 10,
   },
   topBarCenter: {
-    flex: 1,
     alignItems: 'center',
   },
   appName: {
@@ -414,14 +361,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
     opacity: 0.85,
-  },
-  gearBtn: {
-    width: 44,
-    alignItems: 'flex-end',
-  },
-  gearIcon: {
-    color: Colors.gold,
-    fontSize: 22,
   },
   frameContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -566,57 +505,5 @@ const styles = StyleSheet.create({
   },
   dotDone: {
     backgroundColor: Colors.green,
-  },
-  // API key modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  apiModal: {
-    backgroundColor: Colors.surface,
-    borderRadius: 16,
-    padding: 24,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: Colors.border,
-  },
-  apiModalTitle: {
-    color: Colors.text,
-    fontFamily: Fonts.bold,
-    fontSize: 18,
-    marginBottom: 8,
-  },
-  apiModalLabel: {
-    color: Colors.textSecondary,
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  apiKeyInput: {
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    color: Colors.text,
-    fontFamily: Fonts.regular,
-    fontSize: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 16,
-  },
-  saveBtn: {
-    backgroundColor: Colors.gold,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  saveBtnText: {
-    color: '#000',
-    fontFamily: Fonts.bold,
-    fontSize: 16,
   },
 });
