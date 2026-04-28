@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { Accelerometer } from 'expo-sensors';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -44,6 +45,7 @@ export default function ScanScreen() {
   const [frontUri, setFrontUri] = useState<string | null>(null);
   const [frontCentering, setFrontCentering] = useState<CenteringResult | null>(null);
   const cameraRef = useRef<CameraView>(null);
+  const [accel, setAccel] = useState({ x: 0, y: 0, z: 1 });
 
   const scanLineY = useSharedValue(0);
   const scanLineOpacity = useSharedValue(0);
@@ -91,6 +93,13 @@ export default function ScanScreen() {
     return () => {
       cancelled = true;
     };
+  }, [step]);
+
+  useEffect(() => {
+    if (step === 'analyzing') return;
+    Accelerometer.setUpdateInterval(100);
+    const sub = Accelerometer.addListener(setAccel);
+    return () => sub.remove();
   }, [step]);
 
   const scanLineStyle = useAnimatedStyle(() => ({
@@ -228,6 +237,11 @@ export default function ScanScreen() {
         )}
 
         <View style={styles.shutterRow}>
+          {step !== 'analyzing' && (
+            <View style={styles.levelWrap}>
+              <LevelIndicator x={accel.x} y={accel.y} />
+            </View>
+          )}
           {step !== 'analyzing' ? (
             <Pressable
               style={({ pressed }) => [styles.shutterBtn, pressed && styles.shutterPressed]}
@@ -296,6 +310,37 @@ function StepDot({ active, done }: { active: boolean; done: boolean }) {
         active && styles.dotActive,
       ]}
     />
+  );
+}
+
+const LEVEL_OUTER = 32;
+const LEVEL_BUBBLE = 16;
+const LEVEL_MAX_OFFSET = (LEVEL_OUTER - LEVEL_BUBBLE) / 2;
+const LEVEL_TILT_RANGE = 0.3;
+
+function LevelIndicator({ x, y }: { x: number; y: number }) {
+  const clamp = (v: number) => Math.max(-1, Math.min(1, v / LEVEL_TILT_RANGE));
+  const dx = clamp(x) * LEVEL_MAX_OFFSET;
+  const dy = clamp(-y) * LEVEL_MAX_OFFSET;
+
+  const isGood = Math.abs(x) < 0.08 && Math.abs(y) < 0.08;
+  const isFair = Math.abs(x) < 0.2 && Math.abs(y) < 0.2;
+  const bubbleColor = isGood ? '#4CAF50' : isFair ? '#FFD700' : '#FF5252';
+  const labelColor = isGood ? '#4CAF50' : isFair ? '#FFD700' : '#FF5252';
+  const labelText = isGood ? 'Level ✓' : 'Tilt';
+
+  return (
+    <View style={styles.levelIndicator}>
+      <View style={styles.levelOuter}>
+        <View
+          style={[
+            styles.levelBubble,
+            { backgroundColor: bubbleColor, transform: [{ translateX: dx }, { translateY: dy }] },
+          ]}
+        />
+      </View>
+      <Text style={[styles.levelLabel, { color: labelColor }]}>{labelText}</Text>
+    </View>
   );
 }
 
@@ -496,6 +541,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginTop: 16,
+  },
+  levelWrap: {
+    position: 'absolute',
+    left: 24,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 88,
+  },
+  levelIndicator: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  levelOuter: {
+    width: LEVEL_OUTER,
+    height: LEVEL_OUTER,
+    borderRadius: LEVEL_OUTER / 2,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelBubble: {
+    width: LEVEL_BUBBLE,
+    height: LEVEL_BUBBLE,
+    borderRadius: LEVEL_BUBBLE / 2,
+  },
+  levelLabel: {
+    fontSize: 10,
+    fontFamily: Fonts.semiBold,
   },
   dot: {
     width: 8,

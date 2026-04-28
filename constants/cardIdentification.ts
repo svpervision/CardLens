@@ -1,6 +1,5 @@
 import { File } from 'expo-file-system';
-
-const IDENTIFY_ENDPOINT = 'https://cardlens.vercel.app/api/identify';
+import { IDENTIFY_ENDPOINT } from './apiConfig';
 
 export interface CardIdentificationResult {
   cardName: string;
