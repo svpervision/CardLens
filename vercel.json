@@ -1,6 +1,8 @@
 {
   "version": 2,
+  "installCommand": "npm install --legacy-peer-deps",
   "functions": {
-    "api/identify.ts": { "memory": 256, "maxDuration": 30 }
+    "api/identify.ts": { "memory": 256, "maxDuration": 30 },
+    "api/grade.ts": { "memory": 256, "maxDuration": 30 }
   }
 }

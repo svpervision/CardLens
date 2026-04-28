@@ -1,0 +1,10 @@
+node_modules
+.expo
+.expo-shared
+assets
+app
+constants
+store
+components
+scripts
+.claude-worktrees
