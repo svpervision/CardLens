@@ -48,6 +48,7 @@ export default function ScanScreen() {
   const scanLineY = useSharedValue(0);
   const scanLineOpacity = useSharedValue(0);
 
+  // Capture refs so the async IIFE always sees up-to-date values
   const frontUriRef = useRef<string | null>(null);
   const frontCenteringRef = useRef<CenteringResult | null>(null);
   frontUriRef.current = frontUri;
@@ -181,10 +182,12 @@ export default function ScanScreen() {
       <View style={styles.vignette} pointerEvents="none" />
 
       <SafeAreaView style={styles.topBar} edges={['top']}>
+        <View style={{ width: 44 }} />
         <View style={styles.topBarCenter}>
           <Text style={styles.appName}>CardLens</Text>
           <Text style={styles.stepLabel}>{stepLabel}</Text>
         </View>
+        <View style={{ width: 44 }} />
       </SafeAreaView>
 
       {/* card overlay frame */}
@@ -341,12 +344,13 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 8,
     zIndex: 10,
   },
   topBarCenter: {
+    flex: 1,
     alignItems: 'center',
   },
   appName: {
