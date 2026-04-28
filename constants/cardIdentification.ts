@@ -1,4 +1,4 @@
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 import { IDENTIFY_ENDPOINT } from './apiConfig';
 
 export interface CardIdentificationResult {
@@ -27,7 +27,9 @@ function fallback(): CardIdentificationResult {
 
 export async function identifyCard(imageUri: string): Promise<CardIdentificationResult> {
   try {
-    const imageBase64 = await new File(imageUri).base64();
+    const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
 
     const response = await fetch(IDENTIFY_ENDPOINT, {
       method: 'POST',

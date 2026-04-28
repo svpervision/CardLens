@@ -21,6 +21,7 @@ import { Colors, Fonts } from '../../constants/theme';
 import { PLACEHOLDER_ANALYSIS } from '../../constants/cardData';
 import { gradeCenteringFromPixels } from '../../constants/centeringAnalysis';
 import { CardIdentificationResult, identifyCard } from '../../constants/cardIdentification';
+import { CardGradingResult, gradeCard } from '../../constants/cardGrading';
 import { saveCard } from '../../store/collection';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -43,6 +44,7 @@ export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('front');
   const [frontUri, setFrontUri] = useState<string | null>(null);
+  const [backUri, setBackUri] = useState<string | null>(null);
   const [frontCentering, setFrontCentering] = useState<CenteringResult | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const [accel, setAccel] = useState({ x: 0, y: 0, z: 1 });
@@ -52,8 +54,10 @@ export default function ScanScreen() {
 
   // Capture refs so the async IIFE always sees up-to-date values
   const frontUriRef = useRef<string | null>(null);
+  const backUriRef = useRef<string | null>(null);
   const frontCenteringRef = useRef<CenteringResult | null>(null);
   frontUriRef.current = frontUri;
+  backUriRef.current = backUri;
   frontCenteringRef.current = frontCentering;
 
   useEffect(() => {
@@ -74,19 +78,24 @@ export default function ScanScreen() {
 
     (async () => {
       const uri = frontUriRef.current;
+      const bUri = backUriRef.current;
 
       const identPromise: Promise<CardIdentificationResult | null> =
         uri !== null
           ? identifyCard(uri).catch(() => null)
           : Promise.resolve(null);
 
-      const [identResult] = await Promise.all([
-        identPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, 1500)),
-      ]);
+      const gradePromise: Promise<CardGradingResult | null> =
+        uri !== null
+          ? gradeCard(uri, bUri).catch(() => null)
+          : Promise.resolve(null);
+
+      const minWait = new Promise<void>((resolve) => setTimeout(resolve, 1500));
+      const [identResult, gradeResult] = await Promise.all([identPromise, gradePromise]);
+      await minWait;
 
       if (!cancelled) {
-        await finishAnalysis(identResult);
+        await finishAnalysis(identResult, gradeResult);
       }
     })();
 
@@ -146,6 +155,7 @@ export default function ScanScreen() {
         setFrontUri(photo?.uri ?? null);
         setStep('back');
       } else if (step === 'back') {
+        setBackUri(photo?.uri ?? null);
         setStep('analyzing');
       }
     } catch {
@@ -153,15 +163,32 @@ export default function ScanScreen() {
     }
   }
 
-  async function finishAnalysis(identResult: CardIdentificationResult | null) {
+  async function finishAnalysis(
+    identResult: CardIdentificationResult | null,
+    gradingResult: CardGradingResult | null,
+  ) {
     const centering = frontCenteringRef.current;
     const uri = frontUriRef.current;
+
+    const centeringGrade = centering?.grade ?? PLACEHOLDER_ANALYSIS.subGrades.centering;
+    const corners = gradingResult?.corners ?? PLACEHOLDER_ANALYSIS.subGrades.corners;
+    const edges = gradingResult?.edges ?? PLACEHOLDER_ANALYSIS.subGrades.edges;
+    const surface = gradingResult?.surface ?? PLACEHOLDER_ANALYSIS.subGrades.surface;
+    const cornerColors = gradingResult?.cornerColors ?? PLACEHOLDER_ANALYSIS.cornerColors;
+
+    const subGrades = { centering: centeringGrade, corners, edges, surface };
+    const psaGrade = gradingResult
+      ? Math.min(10, Math.max(1, Math.round((centeringGrade + corners + edges + surface) / 4)))
+      : PLACEHOLDER_ANALYSIS.psaGrade;
 
     const analysis = {
       ...PLACEHOLDER_ANALYSIS,
       id: `card-${Date.now()}`,
       frontUri: uri,
       timestamp: Date.now(),
+      subGrades,
+      cornerColors,
+      psaGrade,
     };
     await saveCard(analysis);
     router.push({
@@ -174,6 +201,7 @@ export default function ScanScreen() {
     });
     setStep('front');
     setFrontUri(null);
+    setBackUri(null);
     setFrontCentering(null);
   }
 

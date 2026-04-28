@@ -1,4 +1,4 @@
-import { File } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 import { FourCorners } from './cardData';
 import { GRADE_ENDPOINT } from './apiConfig';
 
@@ -25,8 +25,12 @@ export async function gradeCard(
   backImageUri: string | null,
 ): Promise<CardGradingResult> {
   try {
-    const frontImageBase64 = await new File(frontImageUri).base64();
-    const backImageBase64 = backImageUri ? await new File(backImageUri).base64() : undefined;
+    const frontImageBase64 = await FileSystem.readAsStringAsync(frontImageUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const backImageBase64 = backImageUri
+      ? await FileSystem.readAsStringAsync(backImageUri, { encoding: FileSystem.EncodingType.Base64 })
+      : undefined;
 
     const response = await fetch(GRADE_ENDPOINT, {
       method: 'POST',
