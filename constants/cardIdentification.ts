@@ -1,57 +1,31 @@
 import * as FileSystem from 'expo-file-system';
 import { IDENTIFY_ENDPOINT } from './apiConfig';
 
-export interface CardIdentificationResult {
+export interface CardIdentification {
   cardName: string;
   setName: string;
   cardNumber: string;
-  gameType: 'pokemon' | 'magic' | 'onepiece' | 'sports' | 'other' | 'unknown';
+  gameType: string;
   rarity: string;
   isHolo: boolean;
-  confidence: 'high' | 'medium' | 'low';
-  rawResponse: string;
+  confidence: number;
 }
 
-function fallback(): CardIdentificationResult {
-  return {
-    cardName: '',
-    setName: '',
-    cardNumber: '',
-    gameType: 'unknown',
-    rarity: '',
-    isHolo: false,
-    confidence: 'low',
-    rawResponse: '',
-  };
-}
+export async function identifyCard(imageUri: string): Promise<CardIdentification> {
+  const base64 = await FileSystem.readAsStringAsync(imageUri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
 
-export async function identifyCard(imageUri: string): Promise<CardIdentificationResult> {
-  try {
-    const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+  const response = await fetch(IDENTIFY_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: base64 }),
+  });
 
-    const response = await fetch(IDENTIFY_ENDPOINT, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ imageBase64, mimeType: 'image/jpeg' }),
-    });
-
-    if (!response.ok) return fallback();
-
-    const parsed = await response.json() as Partial<CardIdentificationResult>;
-
-    return {
-      cardName: parsed.cardName ?? '',
-      setName: parsed.setName ?? '',
-      cardNumber: parsed.cardNumber ?? '',
-      gameType: parsed.gameType ?? 'unknown',
-      rarity: parsed.rarity ?? '',
-      isHolo: Boolean(parsed.isHolo),
-      confidence: parsed.confidence ?? 'low',
-      rawResponse: JSON.stringify(parsed),
-    };
-  } catch {
-    return fallback();
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Identify API error ${response.status}: ${errText}`);
   }
+
+  return response.json() as Promise<CardIdentification>;
 }

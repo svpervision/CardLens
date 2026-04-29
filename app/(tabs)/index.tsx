@@ -1,140 +1,67 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { Accelerometer } from 'expo-sensors';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import {
-  Dimensions,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Colors, Fonts } from '../../constants/theme';
+import { ActivityIndicator, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Accelerometer } from 'expo-sensors';
+import { gradeCard, GradingResult } from '../../constants/cardGrading';
 import { identifyCard } from '../../constants/cardIdentification';
-import { GradingResult, gradeCard } from '../../constants/cardGrading';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
-const CARD_W = SCREEN_W * 0.82;
-const CARD_H = CARD_W * 1.396;
-const CORNER_SIZE = 20;
-const CORNER_THICK = 3;
-const frameTop = (SCREEN_H - CARD_H) / 2;
-const frameLeft = (SCREEN_W - CARD_W) / 2;
+const CARD_W = 280;
+const CARD_H = 392;
 
-type ScanStep = 'front' | 'back' | 'analyzing';
+type Step = 'front' | 'flip' | 'back' | 'analyzing';
 
 export default function ScanScreen() {
+  const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
-  const [step, setStep] = useState<ScanStep>('front');
+  const [step, setStep] = useState<Step>('front');
   const [frontUri, setFrontUri] = useState<string | null>(null);
   const [backUri, setBackUri] = useState<string | null>(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+  const [isLevel, setIsLevel] = useState(false);
   const cameraRef = useRef<CameraView>(null);
-  const [accel, setAccel] = useState({ x: 0, y: 0, z: 1 });
-
-  const scanLineY = useSharedValue(0);
-  const scanLineOpacity = useSharedValue(0);
-
-  // Capture refs so the async IIFE always sees up-to-date values
   const frontUriRef = useRef<string | null>(null);
   const backUriRef = useRef<string | null>(null);
-  frontUriRef.current = frontUri;
-  backUriRef.current = backUri;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (step !== 'analyzing') {
-      scanLineOpacity.value = withTiming(0, { duration: 200 });
-      return;
-    }
+    Accelerometer.setUpdateInterval(150);
+    const sub = Accelerometer.addListener(({ x, y }) => {
+      setTilt({ x, y });
+      setIsLevel(Math.abs(x) < 0.07 && Math.abs(y) < 0.07);
+    });
+    return () => sub.remove();
+  }, []);
 
-    scanLineOpacity.value = withTiming(1, { duration: 200 });
-    scanLineY.value = 0;
-    scanLineY.value = withRepeat(
-      withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }),
-      -1,
-      true
-    );
-
+  useEffect(() => {
+    if (step !== 'analyzing') return;
     let cancelled = false;
 
     (async () => {
       try {
+        const fUri = frontUriRef.current!;
+        const bUri = backUriRef.current ?? undefined;
         const [gradeRes, identifyRes] = await Promise.allSettled([
-          gradeCard(frontUriRef.current!, backUriRef.current ?? undefined),
-          identifyCard(frontUriRef.current!),
+          gradeCard(fUri, bUri),
+          identifyCard(fUri),
         ]);
-
         if (cancelled) return;
-
         const gradeResult = gradeRes.status === 'fulfilled' ? gradeRes.value : null;
         const identifyResult = identifyRes.status === 'fulfilled' ? identifyRes.value : null;
-
-        finishAnalysis(gradeResult, identifyResult);
+        finishAnalysis(gradeResult, identifyResult, fUri, bUri);
       } catch {
-        if (!cancelled) finishAnalysis(null, null);
+        if (!cancelled) finishAnalysis(null, null, frontUriRef.current!, backUriRef.current ?? undefined);
       }
     })();
 
     return () => { cancelled = true; };
   }, [step]);
 
-  useEffect(() => {
-    if (step === 'analyzing') return;
-    Accelerometer.setUpdateInterval(100);
-    const sub = Accelerometer.addListener(setAccel);
-    return () => sub.remove();
-  }, [step]);
-
-  const scanLineStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: scanLineY.value * CARD_H }],
-    opacity: scanLineOpacity.value,
-  }));
-
-  if (!permission) return <View style={styles.container} />;
-
-  if (!permission.granted) {
-    return (
-      <View style={styles.permContainer}>
-        <Text style={styles.permTitle}>Camera Access Needed</Text>
-        <Text style={styles.permBody}>
-          CardLens needs camera access to scan your trading cards.
-        </Text>
-        <Pressable style={styles.permBtn} onPress={requestPermission}>
-          <Text style={styles.permBtnText}>Grant Permission</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  async function capture() {
-    if (!cameraRef.current) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
-      if (step === 'front') {
-        setFrontUri(photo?.uri ?? null);
-        setStep('back');
-      } else if (step === 'back') {
-        setBackUri(photo?.uri ?? null);
-        setStep('analyzing');
-      }
-    } catch {
-      // ignore capture errors
-    }
-  }
-
-  function finishAnalysis(gradeResult: GradingResult | null, identifyResult: any) {
+  function finishAnalysis(gradeResult: GradingResult | null, identifyResult: any, fUri: string, bUri?: string) {
     const centering = gradeResult?.centering?.grade ?? 7;
     const corners = gradeResult?.corners?.grade ?? 7;
     const edges = gradeResult?.edges?.grade ?? 7;
     const surface = gradeResult?.surface?.grade ?? 7;
-
     const weighted = centering * 0.30 + corners * 0.25 + edges * 0.25 + surface * 0.20;
     const minSub = Math.min(centering, corners, edges, surface);
     const psaGrade = Math.min(weighted, minSub + 1);
@@ -143,8 +70,8 @@ export default function ScanScreen() {
     router.push({
       pathname: '/analysis',
       params: {
-        imageUri: frontUriRef.current ?? '',
-        backUri: backUriRef.current ?? '',
+        imageUri: fUri,
+        backUri: bUri ?? '',
         psaGrade: String(finalGrade),
         centering: String(centering),
         corners: String(corners),
@@ -166,417 +93,205 @@ export default function ScanScreen() {
         gameType: identifyResult?.gameType ?? '',
       },
     });
-    setStep('front');
-    setFrontUri(null);
-    setBackUri(null);
   }
 
-  const stepLabel =
-    step === 'front'
-      ? 'Align front of card'
-      : step === 'back'
-      ? 'Flip card — align back'
-      : 'Analyzing…';
+  async function capture() {
+    if (!cameraRef.current) return;
+    const photo = await cameraRef.current.takePictureAsync({ quality: 0.9 });
+    if (!photo) return;
+    if (step === 'front') {
+      setFrontUri(photo.uri);
+      frontUriRef.current = photo.uri;
+      setStep('flip');
+    } else if (step === 'back') {
+      setBackUri(photo.uri);
+      backUriRef.current = photo.uri;
+      setStep('analyzing');
+    }
+  }
+
+  if (!permission) return <View style={styles.container} />;
+  if (!permission.granted) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.permText}>Camera access needed</Text>
+        <TouchableOpacity style={styles.btn} onPress={requestPermission}>
+          <Text style={styles.btnText}>Grant Permission</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (step === 'analyzing') {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#FFD700" />
+        <Text style={[styles.permText, { marginTop: 16 }]}>Analyzing card...</Text>
+        <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>This may take a moment</Text>
+      </View>
+    );
+  }
+
+  if (step === 'flip') {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FFD700', fontSize: 28, fontWeight: '800', marginBottom: 12 }}>↩</Text>
+        <Text style={styles.permText}>Flip the card over</Text>
+        <Text style={{ color: '#888', fontSize: 13, marginBottom: 32 }}>Now scan the back</Text>
+        <TouchableOpacity style={styles.btn} onPress={() => setStep('back')}>
+          <Text style={styles.btnText}>Ready — Scan Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const screenCenterX = 195;
+  const screenCenterY = 420;
+  const frameLeft = screenCenterX - CARD_W / 2;
+  const frameTop = screenCenterY - CARD_H / 2;
+
+  const bubbleColor = isLevel ? '#00e676' : '#ff9800';
 
   return (
     <View style={styles.container}>
-      <CameraView ref={cameraRef} style={StyleSheet.absoluteFill} facing="back" />
+      <CameraView style={StyleSheet.absoluteFill} ref={cameraRef} facing="back" />
 
-      <View style={styles.vignette} pointerEvents="none" />
+      {/* Dark overlays */}
+      <View style={[styles.overlay, { top: 0, left: 0, right: 0, height: frameTop }]} />
+      <View style={[styles.overlay, { top: frameTop + CARD_H, left: 0, right: 0, bottom: 0 }]} />
+      <View style={[styles.overlay, { top: frameTop, left: 0, width: frameLeft, height: CARD_H }]} />
+      <View style={[styles.overlay, { top: frameTop, left: frameLeft + CARD_W, right: 0, height: CARD_H }]} />
 
-      <SafeAreaView style={styles.topBar} edges={['top']}>
-        <View style={{ width: 44 }} />
-        <View style={styles.topBarCenter}>
-          <Text style={styles.appName}>CardLens</Text>
-          <Text style={styles.stepLabel}>{stepLabel}</Text>
+      {/* Gold corner brackets */}
+      {[
+        { top: frameTop - 2, left: frameLeft - 2 },
+        { top: frameTop - 2, left: frameLeft + CARD_W - 22 },
+        { top: frameTop + CARD_H - 22, left: frameLeft - 2 },
+        { top: frameTop + CARD_H - 22, left: frameLeft + CARD_W - 22 },
+      ].map((pos, i) => (
+        <View key={i} style={[styles.corner, pos,
+          i === 0 && { borderRightWidth: 0, borderBottomWidth: 0 },
+          i === 1 && { borderLeftWidth: 0, borderBottomWidth: 0 },
+          i === 2 && { borderRightWidth: 0, borderTopWidth: 0 },
+          i === 3 && { borderLeftWidth: 0, borderTopWidth: 0 },
+        ]} />
+      ))}
+
+      {/* Level indicator */}
+      <View style={styles.levelContainer}>
+        <View style={styles.levelRing}>
+          <View style={[styles.levelBubble, {
+            backgroundColor: bubbleColor,
+            transform: [
+              { translateX: Math.max(-18, Math.min(18, tilt.x * 60)) },
+              { translateY: Math.max(-18, Math.min(18, tilt.y * 60)) },
+            ],
+          }]} />
         </View>
-        <View style={{ width: 44 }} />
-      </SafeAreaView>
-
-      {/* card overlay frame */}
-      <View style={styles.frameContainer} pointerEvents="none">
-        <View style={[styles.dimOverlay, styles.dimTop]} />
-        <View style={[styles.dimOverlay, styles.dimBottom]} />
-        <View
-          style={[
-            styles.dimOverlay,
-            styles.dimSide,
-            { left: 0, top: frameTop, height: CARD_H },
-          ]}
-        />
-        <View
-          style={[
-            styles.dimOverlay,
-            styles.dimSide,
-            { right: 0, top: frameTop, height: CARD_H },
-          ]}
-        />
-
-        <View style={styles.cardFrame}>
-          {step === 'analyzing' && (
-            <Animated.View style={[styles.scanLine, scanLineStyle]} />
-          )}
-          <CornerMark position="topLeft" />
-          <CornerMark position="topRight" />
-          <CornerMark position="bottomLeft" />
-          <CornerMark position="bottomRight" />
-        </View>
+        <Text style={[styles.levelText, { color: bubbleColor }]}>
+          {isLevel ? '✓ Level' : 'Tilt to level'}
+        </Text>
       </View>
 
-      <SafeAreaView style={styles.bottomBar} edges={['bottom']}>
-        {step === 'back' && (
-          <View style={styles.flipHint}>
-            <Text style={styles.flipHintText}>↕ Flip your card</Text>
-          </View>
-        )}
-
-        <View style={styles.shutterRow}>
-          {step !== 'analyzing' && (
-            <View style={styles.levelWrap}>
-              <LevelIndicator x={accel.x} y={accel.y} />
-            </View>
-          )}
-          {step !== 'analyzing' ? (
-            <Pressable
-              style={({ pressed }) => [styles.shutterBtn, pressed && styles.shutterPressed]}
-              onPress={capture}
-            >
-              <View style={styles.shutterRing}>
-                <View style={styles.shutterInner} />
-              </View>
-            </Pressable>
-          ) : (
-            <View style={styles.analyzingIndicator}>
-              <Text style={styles.analyzingText}>Analyzing card…</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.stepDots}>
-          <StepDot active={step === 'front'} done={step === 'back' || step === 'analyzing'} />
-          <StepDot active={step === 'back'} done={step === 'analyzing'} />
-          <StepDot active={step === 'analyzing'} done={false} />
-        </View>
-      </SafeAreaView>
-    </View>
-  );
-}
-
-function CornerMark({
-  position,
-}: {
-  position: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
-}) {
-  const isTop = position.startsWith('top');
-  const isLeft = position.endsWith('Left');
-  return (
-    <View
-      style={[
-        styles.corner,
-        isTop ? { top: 0 } : { bottom: 0 },
-        isLeft ? { left: 0 } : { right: 0 },
-      ]}
-    >
-      <View
-        style={[
-          styles.cornerH,
-          isLeft ? { left: 0 } : { right: 0 },
-          isTop ? { top: 0 } : { bottom: 0 },
-        ]}
-      />
-      <View
-        style={[
-          styles.cornerV,
-          isLeft ? { left: 0 } : { right: 0 },
-          isTop ? { top: 0 } : { bottom: 0 },
-        ]}
-      />
-    </View>
-  );
-}
-
-function StepDot({ active, done }: { active: boolean; done: boolean }) {
-  return (
-    <View
-      style={[
-        styles.dot,
-        done && styles.dotDone,
-        active && styles.dotActive,
-      ]}
-    />
-  );
-}
-
-const LEVEL_OUTER = 32;
-const LEVEL_BUBBLE = 16;
-const LEVEL_MAX_OFFSET = (LEVEL_OUTER - LEVEL_BUBBLE) / 2;
-const LEVEL_TILT_RANGE = 0.3;
-
-function LevelIndicator({ x, y }: { x: number; y: number }) {
-  const clamp = (v: number) => Math.max(-1, Math.min(1, v / LEVEL_TILT_RANGE));
-  const dx = clamp(x) * LEVEL_MAX_OFFSET;
-  const dy = clamp(-y) * LEVEL_MAX_OFFSET;
-
-  const isGood = Math.abs(x) < 0.08 && Math.abs(y) < 0.08;
-  const isFair = Math.abs(x) < 0.2 && Math.abs(y) < 0.2;
-  const bubbleColor = isGood ? '#4CAF50' : isFair ? '#FFD700' : '#FF5252';
-  const labelColor = isGood ? '#4CAF50' : isFair ? '#FFD700' : '#FF5252';
-  const labelText = isGood ? 'Level ✓' : 'Tilt';
-
-  return (
-    <View style={styles.levelIndicator}>
-      <View style={styles.levelOuter}>
-        <View
-          style={[
-            styles.levelBubble,
-            { backgroundColor: bubbleColor, transform: [{ translateX: dx }, { translateY: dy }] },
-          ]}
-        />
+      {/* Instructions */}
+      <View style={{ position: 'absolute', top: frameTop - 48, left: 0, right: 0, alignItems: 'center' }}>
+        <Text style={styles.instructionText}>
+          {step === 'front' ? 'Align card front within frame' : 'Align card back within frame'}
+        </Text>
       </View>
-      <Text style={[styles.levelLabel, { color: labelColor }]}>{labelText}</Text>
+
+      {/* Shutter button */}
+      <View style={styles.shutterRow}>
+        <TouchableOpacity style={styles.shutter} onPress={capture}>
+          <View style={styles.shutterInner} />
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
-  vignette: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
-  },
-  permContainer: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 32,
-  },
-  permTitle: {
-    color: Colors.text,
-    fontFamily: Fonts.bold,
-    fontSize: 22,
-    marginBottom: 12,
-  },
-  permBody: {
-    color: Colors.textSecondary,
-    fontFamily: Fonts.regular,
-    fontSize: 15,
-    textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 22,
-  },
-  permBtn: {
-    backgroundColor: Colors.gold,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  permBtnText: {
-    color: '#000',
-    fontFamily: Fonts.bold,
-    fontSize: 16,
-  },
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    zIndex: 10,
-  },
-  topBarCenter: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  appName: {
-    color: Colors.gold,
-    fontFamily: Fonts.bold,
-    fontSize: 18,
-    letterSpacing: 1.5,
-  },
-  stepLabel: {
-    color: Colors.text,
-    fontFamily: Fonts.regular,
-    fontSize: 13,
-    marginTop: 4,
-    opacity: 0.85,
-  },
-  frameContainer: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  dimOverlay: {
-    position: 'absolute',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  dimTop: {
-    top: 0,
-    left: 0,
-    right: 0,
-    height: frameTop,
-  },
-  dimBottom: {
-    top: frameTop + CARD_H,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  dimSide: {
-    width: frameLeft,
-  },
-  cardFrame: {
-    position: 'absolute',
-    top: frameTop,
-    left: frameLeft,
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.35)',
-    overflow: 'hidden',
-  },
-  scanLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: Colors.gold,
-    shadowColor: Colors.gold,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 8,
-  },
+  overlay: { position: 'absolute', backgroundColor: 'rgba(0,0,0,0.6)' },
   corner: {
     position: 'absolute',
-    width: CORNER_SIZE,
-    height: CORNER_SIZE,
+    width: 24,
+    height: 24,
+    borderColor: '#FFD700',
+    borderWidth: 3,
   },
-  cornerH: {
+  levelContainer: {
     position: 'absolute',
-    width: CORNER_SIZE,
-    height: CORNER_THICK,
-    backgroundColor: Colors.gold,
-    borderRadius: 1,
+    bottom: 120,
+    right: 20,
+    alignItems: 'center',
   },
-  cornerV: {
-    position: 'absolute',
-    width: CORNER_THICK,
-    height: CORNER_SIZE,
-    backgroundColor: Colors.gold,
-    borderRadius: 1,
+  levelRing: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  bottomBar: {
+  levelBubble: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  levelText: {
+    fontSize: 10,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  instructionText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0,0,0,0.8)',
+    textShadowRadius: 4,
+    textShadowOffset: { width: 0, height: 1 },
+  },
+  shutterRow: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 40,
     left: 0,
     right: 0,
     alignItems: 'center',
-    paddingBottom: 16,
-    zIndex: 10,
   },
-  flipHint: {
-    backgroundColor: 'rgba(255,215,0,0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,215,0,0.3)',
-  },
-  flipHintText: {
-    color: Colors.gold,
-    fontFamily: Fonts.semiBold,
-    fontSize: 14,
-  },
-  shutterRow: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 88,
-  },
-  shutterBtn: {
-    width: 80,
-    height: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterPressed: { opacity: 0.7 },
-  shutterRing: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+  shutter: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     borderWidth: 3,
-    borderColor: Colors.gold,
-    alignItems: 'center',
+    borderColor: '#fff',
     justifyContent: 'center',
+    alignItems: 'center',
   },
   shutterInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: Colors.gold,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#fff',
   },
-  analyzingIndicator: {
-    backgroundColor: Colors.surface,
-    borderRadius: 20,
+  permText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  btn: {
+    backgroundColor: '#FFD700',
     paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: Colors.gold,
+    paddingVertical: 12,
+    borderRadius: 12,
   },
-  analyzingText: {
-    color: Colors.gold,
-    fontFamily: Fonts.semiBold,
+  btnText: {
+    color: '#000',
+    fontWeight: '700',
     fontSize: 15,
-  },
-  stepDots: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-  },
-  levelWrap: {
-    position: 'absolute',
-    left: 24,
-    bottom: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 88,
-  },
-  levelIndicator: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  levelOuter: {
-    width: LEVEL_OUTER,
-    height: LEVEL_OUTER,
-    borderRadius: LEVEL_OUTER / 2,
-    borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  levelBubble: {
-    width: LEVEL_BUBBLE,
-    height: LEVEL_BUBBLE,
-    borderRadius: LEVEL_BUBBLE / 2,
-  },
-  levelLabel: {
-    fontSize: 10,
-    fontFamily: Fonts.semiBold,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-  },
-  dotActive: {
-    backgroundColor: Colors.gold,
-    width: 24,
-  },
-  dotDone: {
-    backgroundColor: Colors.green,
   },
 });
