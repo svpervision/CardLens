@@ -14,6 +14,7 @@ import {
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -51,14 +52,9 @@ export default function AnalysisScreen() {
   const edgesIssuesList: string[]   = JSON.parse(edgesIssues   || '[]');
   const surfaceIssuesList: string[] = JSON.parse(surfaceIssues  || '[]');
 
-  const psaGradeNum   = psaGrade  ? parseFloat(psaGrade)  : 0;
-  const displayImage  = imageUri  ?? null;
-  const showIdent     = !!cardName && cardName !== 'Unknown Card';
-
-  const centeringExtra =
-    centeringRatioLR && centeringRatioTB
-      ? `${centeringRatioLR} left-right · ${centeringRatioTB} top-bottom`
-      : centeringRatioLR || centeringRatioTB || '';
+  const psaGradeNum  = psaGrade ? parseFloat(psaGrade) : 0;
+  const displayImage = imageUri ?? null;
+  const showIdent    = !!cardName && cardName !== 'Unknown Card';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -126,34 +122,45 @@ export default function AnalysisScreen() {
 
         {/* ── Subgrades ── */}
         <Section title="Subgrades">
-          <SubgradeCard
+          <SubGradeRow
             label="Centering"
-            grade={centering ?? '0'}
-            details={centeringDetails ?? ''}
+            value={centering ? parseFloat(centering) : 0}
+            index={0}
+            details={centeringDetails}
             issues={[]}
-            extra={centeringExtra}
           />
-          <SubgradeCard
+          <SubGradeRow
             label="Corners"
-            grade={corners ?? '0'}
-            details={cornersDetails ?? ''}
+            value={corners ? parseFloat(corners) : 0}
+            index={1}
+            details={cornersDetails}
             issues={cornersIssuesList}
           />
-          <SubgradeCard
+          <SubGradeRow
             label="Edges"
-            grade={edges ?? '0'}
-            details={edgesDetails ?? ''}
+            value={edges ? parseFloat(edges) : 0}
+            index={2}
+            details={edgesDetails}
             issues={edgesIssuesList}
           />
-          <SubgradeCard
+          <SubGradeRow
             label="Surface"
-            grade={surface ?? '0'}
-            details={surfaceDetails ?? ''}
+            value={surface ? parseFloat(surface) : 0}
+            index={3}
+            details={surfaceDetails}
             issues={surfaceIssuesList}
+            last
           />
         </Section>
 
-        {/* ── Overall notes ── */}
+        {/* ── Centering detail ── */}
+        {(centeringRatioLR || centeringRatioTB) ? (
+          <Section title="Centering Detail">
+            <CenteringDetail lr={centeringRatioLR ?? ''} tb={centeringRatioTB ?? ''} />
+          </Section>
+        ) : null}
+
+        {/* ── Expert assessment ── */}
         {overallNotes ? (
           <Section title="Expert Assessment">
             <Text style={styles.overallNotes}>{overallNotes}</Text>
@@ -193,34 +200,6 @@ export default function AnalysisScreen() {
   );
 }
 
-// ─── Subgrade card ────────────────────────────────────────────────────────────
-
-function SubgradeCard({ label, grade, details, issues, extra }: {
-  label: string; grade: string; details: string; issues: string[]; extra?: string;
-}) {
-  const g = parseFloat(grade);
-  const color = g >= 9 ? '#00c853' : g >= 7 ? '#ffd600' : '#ff5252';
-  return (
-    <View style={styles.subgradeCard}>
-      <View style={styles.subgradeHeader}>
-        <Text style={styles.subgradeLabel}>{label}</Text>
-        <Text style={[styles.subgradeGrade, { color }]}>{grade}</Text>
-      </View>
-      {extra ? <Text style={styles.subgradeExtra}>{extra}</Text> : null}
-      {details ? <Text style={styles.subgradeDetails}>{details}</Text> : null}
-      {issues.length > 0 && (
-        <View style={styles.issuesList}>
-          {issues.map((issue, i) => (
-            <View key={i} style={styles.issueTag}>
-              <Text style={styles.issueText}>{issue}</Text>
-            </View>
-          ))}
-        </View>
-      )}
-    </View>
-  );
-}
-
 // ─── Grade hero ──────────────────────────────────────────────────────────────
 
 function GradeHero({ grade, cardName, cardSet }: {
@@ -251,6 +230,72 @@ function GradeHero({ grade, cardName, cardSet }: {
       </View>
       <Text style={styles.gradeSubLabel}>AI Estimate</Text>
     </Animated.View>
+  );
+}
+
+// ─── Subgrade row ─────────────────────────────────────────────────────────────
+
+function SubGradeRow({ label, value, index, details, issues, last }: {
+  label: string; value: number; index: number;
+  details?: string; issues: string[]; last?: boolean;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withDelay(index * 100, withTiming(value / 10, { duration: 600 }));
+  }, [value]);
+
+  const barStyle = useAnimatedStyle(() => ({
+    width: `${progress.value * 100}%` as any,
+  }));
+
+  const color = gradeColor(value);
+
+  return (
+    <View style={[styles.subGradeBlock, last && styles.subGradeBlockLast]}>
+      <View style={styles.subGradeRow}>
+        <Text style={styles.subGradeLabel}>{label}</Text>
+        <View style={styles.subGradeBarBg}>
+          <Animated.View style={[styles.subGradeBar, barStyle, { backgroundColor: color }]} />
+        </View>
+        <Text style={[styles.subGradeValue, { color }]}>{value.toFixed(1)}</Text>
+      </View>
+      {details ? <Text style={styles.subGradeDetails}>{details}</Text> : null}
+      {issues.length > 0 && (
+        <View style={styles.issuesList}>
+          {issues.map((issue, i) => (
+            <View key={i} style={styles.issueTag}>
+              <Text style={styles.issueText}>{issue}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ─── Centering detail ─────────────────────────────────────────────────────────
+
+function CenteringDetail({ lr, tb }: { lr: string; tb: string }) {
+  return (
+    <View>
+      {lr ? (
+        <View style={styles.centeringRow}>
+          <Text style={styles.centeringLabel}>Left / Right</Text>
+          <Text style={[styles.centeringValue, { color: Colors.gold }]}>{lr}</Text>
+        </View>
+      ) : null}
+      {tb ? (
+        <View style={[styles.centeringRow, styles.centeringRowLast]}>
+          <Text style={styles.centeringLabel}>Top / Bottom</Text>
+          <Text style={[styles.centeringValue, { color: Colors.gold }]}>{tb}</Text>
+        </View>
+      ) : null}
+      <View style={styles.psaStds}>
+        <Text style={styles.psaStdTitle}>PSA Standards</Text>
+        <Text style={styles.psaStd}>10 = 55/45  ·  9 = 60/40  ·  8 = 65/35</Text>
+      </View>
+    </View>
   );
 }
 
@@ -405,21 +450,32 @@ const styles = StyleSheet.create({
   },
   sectionBody: {
     backgroundColor: Colors.surface, borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border, padding: 12,
+    borderWidth: 1, borderColor: Colors.border, padding: 16,
   },
 
-  // ── Subgrade cards ──
-  subgradeCard:   { backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14, marginBottom: 10 },
-  subgradeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  subgradeLabel:  { color: '#aaa', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
-  subgradeGrade:  { fontSize: 22, fontWeight: '800' },
-  subgradeExtra:  { color: '#888', fontSize: 12, marginTop: 2 },
-  subgradeDetails: { color: '#ccc', fontSize: 13, marginTop: 6, lineHeight: 18 },
-  issuesList:     { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 4 },
-  issueTag:       { backgroundColor: '#2a1a1a', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  issueText:      { color: '#ff9999', fontSize: 11 },
+  // ── Subgrades ──
+  subGradeBlock:     { paddingBottom: 14, marginBottom: 14, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  subGradeBlockLast: { paddingBottom: 0, marginBottom: 0, borderBottomWidth: 0 },
+  subGradeRow:       { flexDirection: 'row', alignItems: 'center' },
+  subGradeLabel:     { color: Colors.text, fontFamily: Fonts.regular, fontSize: 14, width: 90 },
+  subGradeBarBg:     { flex: 1, height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: 'hidden', marginHorizontal: 12 },
+  subGradeBar:       { height: '100%', borderRadius: 3 },
+  subGradeValue:     { fontFamily: Fonts.bold, fontSize: 14, width: 36, textAlign: 'right' },
+  subGradeDetails:   { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 13, marginTop: 6, lineHeight: 18 },
+  issuesList:        { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 4 },
+  issueTag:          { backgroundColor: '#2a1a1a', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: '#3a2a2a' },
+  issueText:         { color: '#ff9999', fontFamily: Fonts.regular, fontSize: 11 },
 
-  // ── Overall notes ──
+  // ── Centering detail ──
+  centeringRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.border },
+  centeringRowLast: { borderBottomWidth: 0 },
+  centeringLabel:   { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 14 },
+  centeringValue:   { fontFamily: Fonts.bold, fontSize: 18 },
+  psaStds:          { marginTop: 12 },
+  psaStdTitle:      { color: Colors.textSecondary, fontFamily: Fonts.semiBold, fontSize: 12, marginBottom: 4 },
+  psaStd:           { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12, lineHeight: 18 },
+
+  // ── Expert notes ──
   overallNotes: { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 14, lineHeight: 20 },
 
   // ── CTA ──
