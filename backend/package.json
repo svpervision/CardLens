@@ -1,8 +1,8 @@
 {
-  "name": "cardlens-api",
+  "name": "cardlens-backend",
   "version": "1.0.0",
-  "private": true,
   "dependencies": {
-    "@vercel/node": "^5.0.0"
+    "@anthropic-ai/sdk": "^0.24.0",
+    "@vercel/node": "^3.0.0"
   }
 }

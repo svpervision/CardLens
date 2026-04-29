@@ -21,27 +21,23 @@ export interface GradingResult {
 }
 
 export async function gradeCard(frontUri: string, backUri?: string): Promise<GradingResult> {
-  const frontBase64 = await FileSystem.readAsStringAsync(frontUri, {
+  const frontImage = await FileSystem.readAsStringAsync(frontUri, {
     encoding: FileSystem.EncodingType.Base64,
   });
-
-  let backBase64: string | undefined;
+  let backImage: string | undefined;
   if (backUri) {
-    backBase64 = await FileSystem.readAsStringAsync(backUri, {
+    backImage = await FileSystem.readAsStringAsync(backUri, {
       encoding: FileSystem.EncodingType.Base64,
     });
   }
-
   const response = await fetch(GRADE_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ frontImage: frontBase64, backImage: backBase64 }),
+    body: JSON.stringify({ frontImage, backImage }),
   });
-
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Grading API error ${response.status}: ${errText}`);
+    const txt = await response.text();
+    throw new Error(`Grade ${response.status}: ${txt}`);
   }
-
-  return response.json() as Promise<GradingResult>;
+  return response.json();
 }

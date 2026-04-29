@@ -15,17 +15,14 @@ export async function identifyCard(imageUri: string): Promise<CardIdentification
   const base64 = await FileSystem.readAsStringAsync(imageUri, {
     encoding: FileSystem.EncodingType.Base64,
   });
-
   const response = await fetch(IDENTIFY_ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: base64 }),
   });
-
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Identify API error ${response.status}: ${errText}`);
+    const txt = await response.text();
+    throw new Error(`Identify ${response.status}: ${txt}`);
   }
-
-  return response.json() as Promise<CardIdentification>;
+  return response.json();
 }

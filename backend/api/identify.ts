@@ -10,7 +10,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { image } = req.body;
+  const { image } = req.body || {};
   if (!image) return res.status(400).json({ error: 'image required' });
 
   try {
@@ -21,24 +21,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
-          { type: 'text', text: `Identify this trading card. Return ONLY valid JSON:
+          {
+            type: 'text',
+            text: `Identify this trading card precisely. Return ONLY a valid JSON object, no markdown, no explanation:
 {
-  "cardName": "<name of the card>",
+  "cardName": "<full card name>",
   "setName": "<set or expansion name>",
-  "cardNumber": "<card number if visible>",
-  "gameType": "<Pokemon, Magic: The Gathering, One Piece, Sports, etc>",
+  "cardNumber": "<card number if visible, else empty string>",
+  "gameType": "<Pokemon, Magic: The Gathering, One Piece, Sports, or Other>",
   "rarity": "<Common, Uncommon, Rare, Ultra Rare, Secret Rare, etc>",
   "isHolo": <true or false>,
   "confidence": <0.0 to 1.0>
 }
-If you cannot identify the card, use "Unknown" for string fields and 0.1 for confidence.` }
+If you cannot identify the card clearly, still do your best and set confidence low.`
+          }
         ]
       }]
     });
 
     const text = (message.content[0] as any).text;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON in response');
+    if (!jsonMatch) throw new Error('No JSON found in response');
     return res.status(200).json(JSON.parse(jsonMatch[0]));
   } catch (err: any) {
     console.error('Identify error:', err);
