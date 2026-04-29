@@ -18,11 +18,8 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Fonts } from '../../constants/theme';
-import { PLACEHOLDER_ANALYSIS } from '../../constants/cardData';
-import { gradeCenteringFromPixels } from '../../constants/centeringAnalysis';
-import { CardIdentificationResult, identifyCard } from '../../constants/cardIdentification';
-import { CardGradingResult, gradeCard } from '../../constants/cardGrading';
-import { saveCard } from '../../store/collection';
+import { identifyCard } from '../../constants/cardIdentification';
+import { GradingResult, gradeCard } from '../../constants/cardGrading';
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 const CARD_W = SCREEN_W * 0.82;
@@ -34,18 +31,11 @@ const frameLeft = (SCREEN_W - CARD_W) / 2;
 
 type ScanStep = 'front' | 'back' | 'analyzing';
 
-type CenteringResult = {
-  lr: [number, number];
-  tb: [number, number];
-  grade: number;
-};
-
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [step, setStep] = useState<ScanStep>('front');
   const [frontUri, setFrontUri] = useState<string | null>(null);
   const [backUri, setBackUri] = useState<string | null>(null);
-  const [frontCentering, setFrontCentering] = useState<CenteringResult | null>(null);
   const cameraRef = useRef<CameraView>(null);
   const [accel, setAccel] = useState({ x: 0, y: 0, z: 1 });
 
@@ -55,10 +45,8 @@ export default function ScanScreen() {
   // Capture refs so the async IIFE always sees up-to-date values
   const frontUriRef = useRef<string | null>(null);
   const backUriRef = useRef<string | null>(null);
-  const frontCenteringRef = useRef<CenteringResult | null>(null);
   frontUriRef.current = frontUri;
   backUriRef.current = backUri;
-  frontCenteringRef.current = frontCentering;
 
   useEffect(() => {
     if (step !== 'analyzing') {
@@ -77,31 +65,24 @@ export default function ScanScreen() {
     let cancelled = false;
 
     (async () => {
-      const uri = frontUriRef.current;
-      const bUri = backUriRef.current;
+      try {
+        const [gradeRes, identifyRes] = await Promise.allSettled([
+          gradeCard(frontUriRef.current!, backUriRef.current ?? undefined),
+          identifyCard(frontUriRef.current!),
+        ]);
 
-      const identPromise: Promise<CardIdentificationResult | null> =
-        uri !== null
-          ? identifyCard(uri).catch(() => null)
-          : Promise.resolve(null);
+        if (cancelled) return;
 
-      const gradePromise: Promise<CardGradingResult | null> =
-        uri !== null
-          ? gradeCard(uri, bUri).catch(() => null)
-          : Promise.resolve(null);
+        const gradeResult = gradeRes.status === 'fulfilled' ? gradeRes.value : null;
+        const identifyResult = identifyRes.status === 'fulfilled' ? identifyRes.value : null;
 
-      const minWait = new Promise<void>((resolve) => setTimeout(resolve, 1500));
-      const [identResult, gradeResult] = await Promise.all([identPromise, gradePromise]);
-      await minWait;
-
-      if (!cancelled) {
-        await finishAnalysis(identResult, gradeResult);
+        finishAnalysis(gradeResult, identifyResult);
+      } catch {
+        if (!cancelled) finishAnalysis(null, null);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [step]);
 
   useEffect(() => {
@@ -137,21 +118,6 @@ export default function ScanScreen() {
     try {
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
       if (step === 'front') {
-        if (photo) {
-          const scaleX = photo.width / SCREEN_W;
-          const scaleY = photo.height / SCREEN_H;
-          const result = gradeCenteringFromPixels(photo.width, photo.height, {
-            left: frameLeft * scaleX,
-            right: (frameLeft + CARD_W) * scaleX,
-            top: frameTop * scaleY,
-            bottom: (frameTop + CARD_H) * scaleY,
-          });
-          setFrontCentering({
-            lr: result.frontRatio,
-            tb: result.topBottomRatio,
-            grade: result.grade,
-          });
-        }
         setFrontUri(photo?.uri ?? null);
         setStep('back');
       } else if (step === 'back') {
@@ -163,46 +129,46 @@ export default function ScanScreen() {
     }
   }
 
-  async function finishAnalysis(
-    identResult: CardIdentificationResult | null,
-    gradingResult: CardGradingResult | null,
-  ) {
-    const centering = frontCenteringRef.current;
-    const uri = frontUriRef.current;
+  function finishAnalysis(gradeResult: GradingResult | null, identifyResult: any) {
+    const centering = gradeResult?.centering?.grade ?? 7;
+    const corners = gradeResult?.corners?.grade ?? 7;
+    const edges = gradeResult?.edges?.grade ?? 7;
+    const surface = gradeResult?.surface?.grade ?? 7;
 
-    const centeringGrade = centering?.grade ?? PLACEHOLDER_ANALYSIS.subGrades.centering;
-    const corners = gradingResult?.corners ?? PLACEHOLDER_ANALYSIS.subGrades.corners;
-    const edges = gradingResult?.edges ?? PLACEHOLDER_ANALYSIS.subGrades.edges;
-    const surface = gradingResult?.surface ?? PLACEHOLDER_ANALYSIS.subGrades.surface;
-    const cornerColors = gradingResult?.cornerColors ?? PLACEHOLDER_ANALYSIS.cornerColors;
+    const weighted = centering * 0.30 + corners * 0.25 + edges * 0.25 + surface * 0.20;
+    const minSub = Math.min(centering, corners, edges, surface);
+    const psaGrade = Math.min(weighted, minSub + 1);
+    const finalGrade = Math.round(psaGrade * 2) / 2;
 
-    const subGrades = { centering: centeringGrade, corners, edges, surface };
-    const psaGrade = gradingResult
-      ? Math.min(10, Math.max(1, Math.round((centeringGrade + corners + edges + surface) / 4)))
-      : PLACEHOLDER_ANALYSIS.psaGrade;
-
-    const analysis = {
-      ...PLACEHOLDER_ANALYSIS,
-      id: `card-${Date.now()}`,
-      frontUri: uri,
-      timestamp: Date.now(),
-      subGrades,
-      cornerColors,
-      psaGrade,
-    };
-    await saveCard(analysis);
     router.push({
       pathname: '/analysis',
       params: {
-        imageUri: uri ?? '',
-        centeringData: centering ? JSON.stringify(centering) : '',
-        cardIdentification: identResult ? JSON.stringify(identResult) : '',
+        imageUri: frontUriRef.current ?? '',
+        backUri: backUriRef.current ?? '',
+        psaGrade: String(finalGrade),
+        centering: String(centering),
+        corners: String(corners),
+        edges: String(edges),
+        surface: String(surface),
+        centeringDetails: gradeResult?.centering?.details ?? '',
+        centeringRatioLR: gradeResult?.centering?.leftRightRatio ?? '',
+        centeringRatioTB: gradeResult?.centering?.topBottomRatio ?? '',
+        cornersDetails: gradeResult?.corners?.details ?? '',
+        cornersIssues: JSON.stringify(gradeResult?.corners?.issues ?? []),
+        edgesDetails: gradeResult?.edges?.details ?? '',
+        edgesIssues: JSON.stringify(gradeResult?.edges?.issues ?? []),
+        surfaceDetails: gradeResult?.surface?.details ?? '',
+        surfaceIssues: JSON.stringify(gradeResult?.surface?.issues ?? []),
+        overallNotes: gradeResult?.overallNotes ?? '',
+        cardName: identifyResult?.cardName ?? 'Unknown Card',
+        setName: identifyResult?.setName ?? '',
+        cardNumber: identifyResult?.cardNumber ?? '',
+        gameType: identifyResult?.gameType ?? '',
       },
     });
     setStep('front');
     setFrontUri(null);
     setBackUri(null);
-    setFrontCentering(null);
   }
 
   const stepLabel =

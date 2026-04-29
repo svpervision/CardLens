@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Dimensions,
   Image,
@@ -14,28 +14,16 @@ import {
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withTiming,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CardAnalysis, CenteringMeasurement, CornerColor, FourCorners, PLACEHOLDER_ANALYSIS } from '../constants/cardData';
 import { CardIdentificationResult } from '../constants/cardIdentification';
-import { loadCollection } from '../store/collection';
 import { Colors, Fonts, gradeColor } from '../constants/theme';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 
-type LiveCentering = { lr: [number, number]; tb: [number, number]; grade: number };
-
-// Card image displayed at 62% screen width
 const CARD_IMG_W = SCREEN_W * 0.62;
 const CARD_IMG_H = CARD_IMG_W * 1.396;
-
-const DOT_COLORS: Record<CornerColor, string> = {
-  green:  Colors.green,
-  yellow: Colors.yellow,
-  red:    Colors.red,
-};
 
 const GAME_LABELS: Record<CardIdentificationResult['gameType'], string> = {
   pokemon:  'POKÉMON',
@@ -47,48 +35,30 @@ const GAME_LABELS: Record<CardIdentificationResult['gameType'], string> = {
 };
 
 export default function AnalysisScreen() {
-  const { cardId, imageUri, centeringData, cardIdentification } = useLocalSearchParams<{
-    cardId?: string;
-    imageUri?: string;
-    centeringData?: string;
-    cardIdentification?: string;
-  }>();
-  const [card, setCard] = useState<CardAnalysis>(PLACEHOLDER_ANALYSIS);
+  const {
+    imageUri, psaGrade,
+    centering, corners, edges, surface,
+    centeringDetails, centeringRatioLR, centeringRatioTB,
+    cornersDetails, cornersIssues,
+    edgesDetails, edgesIssues,
+    surfaceDetails, surfaceIssues,
+    overallNotes, cardName, setName, cardNumber, gameType,
+  } = useLocalSearchParams<Record<string, string>>();
+
   const [fullscreen, setFullscreen] = useState(false);
 
-  useEffect(() => {
-    loadCollection().then((col) => {
-      if (cardId) {
-        const found = col.find((c) => c.id === cardId);
-        if (found) { setCard(found); return; }
-      }
-      if (col.length > 0) setCard(col[0]);
-    });
-  }, [cardId]);
+  const cornersIssuesList: string[] = JSON.parse(cornersIssues || '[]');
+  const edgesIssuesList: string[]   = JSON.parse(edgesIssues   || '[]');
+  const surfaceIssuesList: string[] = JSON.parse(surfaceIssues  || '[]');
 
-  const cornerColors: FourCorners =
-    card.cornerColors ?? ['green', 'green', 'yellow', 'green'];
+  const psaGradeNum   = psaGrade  ? parseFloat(psaGrade)  : 0;
+  const displayImage  = imageUri  ?? null;
+  const showIdent     = !!cardName && cardName !== 'Unknown Card';
 
-  const liveCentering = useMemo<LiveCentering | null>(() => {
-    if (!centeringData) return null;
-    try { return JSON.parse(centeringData) as LiveCentering; } catch { return null; }
-  }, [centeringData]);
-
-  const cardIdent = useMemo<CardIdentificationResult | null>(() => {
-    if (!cardIdentification) return null;
-    try { return JSON.parse(cardIdentification) as CardIdentificationResult; } catch { return null; }
-  }, [cardIdentification]);
-
-  const displayImageUri: string | null = (imageUri || null) ?? card.frontUri;
-  const centeringSubgrade = liveCentering ? liveCentering.grade : card.subGrades.centering;
-  const displayCentering: CenteringMeasurement = liveCentering
-    ? { leftRight: liveCentering.lr, topBottom: liveCentering.tb }
-    : card.centering;
-
-  const showIdentBanner = !!cardIdentification;
-  const identConfident =
-    cardIdent !== null &&
-    (cardIdent.confidence === 'high' || cardIdent.confidence === 'medium');
+  const centeringExtra =
+    centeringRatioLR && centeringRatioTB
+      ? `${centeringRatioLR} left-right · ${centeringRatioTB} top-bottom`
+      : centeringRatioLR || centeringRatioTB || '';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -104,40 +74,46 @@ export default function AnalysisScreen() {
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
         {/* ── Card identification banner ── */}
-        {showIdentBanner && (
-          identConfident && cardIdent ? (
-            <CardIdentBanner ident={cardIdent} />
-          ) : (
-            <View style={styles.notIdentBanner}>
-              <Text style={styles.notIdentText}>Card not identified — </Text>
-              <Pressable>
-                <Text style={styles.addManuallyText}>Add manually</Text>
-              </Pressable>
+        {showIdent ? (
+          <View style={styles.identBanner}>
+            {gameType ? (
+              <View style={styles.identBadge}>
+                <Text style={styles.identBadgeText}>
+                  {GAME_LABELS[gameType as CardIdentificationResult['gameType']] ?? 'CARD'}
+                </Text>
+              </View>
+            ) : null}
+            <View style={styles.identInfo}>
+              <Text style={styles.identCardName} numberOfLines={1}>{cardName}</Text>
+              {(setName || cardNumber) ? (
+                <Text style={styles.identDetails} numberOfLines={1}>
+                  {[setName, cardNumber].filter(Boolean).join(' • ')}
+                </Text>
+              ) : null}
             </View>
-          )
+          </View>
+        ) : (
+          <View style={styles.notIdentBanner}>
+            <Text style={styles.notIdentText}>Card not identified — </Text>
+            <Pressable>
+              <Text style={styles.addManuallyText}>Add manually</Text>
+            </Pressable>
+          </View>
         )}
 
-        {/* ── Card image with defect overlay ── */}
+        {/* ── Card image + grade hero ── */}
         <View style={styles.imageSection}>
           <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreen(true)}>
             <View style={styles.cardImageWrap}>
-              {displayImageUri ? (
-                <Image source={{ uri: displayImageUri }} style={styles.cardImage} resizeMode="cover" />
+              {displayImage ? (
+                <Image source={{ uri: displayImage }} style={styles.cardImage} resizeMode="cover" />
               ) : (
                 <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-                  <Text style={styles.cardImagePlaceholderText}>{card.name.charAt(0)}</Text>
+                  <Text style={styles.cardImagePlaceholderText}>?</Text>
                   <Text style={styles.cardImagePlaceholderSub}>No image captured</Text>
                 </View>
               )}
-
-              {/* Corner defect dots overlaid on the card image */}
-              <CornerDot position="topLeft"     color={cornerColors[0]} />
-              <CornerDot position="topRight"    color={cornerColors[1]} />
-              <CornerDot position="bottomLeft"  color={cornerColors[2]} />
-              <CornerDot position="bottomRight" color={cornerColors[3]} />
-
-              {/* Tap hint */}
-              {displayImageUri && (
+              {displayImage && (
                 <View style={styles.tapHint}>
                   <Text style={styles.tapHintText}>⤢ Tap to expand</Text>
                 </View>
@@ -145,36 +121,44 @@ export default function AnalysisScreen() {
             </View>
           </TouchableOpacity>
 
-          {/* Card name + set beside / below image */}
-          <GradeHero grade={card.psaGrade} confidence={card.confidence} cardName={card.name} cardSet={card.set} />
+          <GradeHero grade={psaGradeNum} cardName={cardName ?? 'Unknown Card'} cardSet={setName ?? ''} />
         </View>
 
         {/* ── Subgrades ── */}
         <Section title="Subgrades">
-          <SubGradeRow label="Centering" value={centeringSubgrade} index={0} />
-          <SubGradeRow label="Corners"   value={card.subGrades.corners}   index={1} />
-          <SubGradeRow label="Edges"     value={card.subGrades.edges}     index={2} />
-          <SubGradeRow label="Surface"   value={card.subGrades.surface}   index={3} />
+          <SubgradeCard
+            label="Centering"
+            grade={centering ?? '0'}
+            details={centeringDetails ?? ''}
+            issues={[]}
+            extra={centeringExtra}
+          />
+          <SubgradeCard
+            label="Corners"
+            grade={corners ?? '0'}
+            details={cornersDetails ?? ''}
+            issues={cornersIssuesList}
+          />
+          <SubgradeCard
+            label="Edges"
+            grade={edges ?? '0'}
+            details={edgesDetails ?? ''}
+            issues={edgesIssuesList}
+          />
+          <SubgradeCard
+            label="Surface"
+            grade={surface ?? '0'}
+            details={surfaceDetails ?? ''}
+            issues={surfaceIssuesList}
+          />
         </Section>
 
-        {/* ── Centering detail ── */}
-        <Section title="Centering Detail">
-          <CenteringDetail centering={displayCentering} />
-        </Section>
-
-        {/* ── Probability ── */}
-        <Section title="Grade Probability">
-          <ProbabilityBar probs={card.probabilities} />
-        </Section>
-
-        {/* ── Market values ── */}
-        <Section title="Market Values">
-          <View style={styles.marketGrid}>
-            {card.marketValues.map((mv) => (
-              <MarketCard key={mv.label} label={mv.label} value={mv.value} isRoi={mv.label === 'Expected ROI'} />
-            ))}
-          </View>
-        </Section>
+        {/* ── Overall notes ── */}
+        {overallNotes ? (
+          <Section title="Expert Assessment">
+            <Text style={styles.overallNotes}>{overallNotes}</Text>
+          </Section>
+        ) : null}
 
         {/* ── CTA ── */}
         <Pressable style={styles.ctaBtn}>
@@ -182,7 +166,7 @@ export default function AnalysisScreen() {
         </Pressable>
 
         <Text style={styles.disclaimer}>
-          * Market values are estimates. Grades are AI predictions — not official PSA grades.
+          * Grades are AI predictions — not official PSA grades.
         </Text>
       </ScrollView>
 
@@ -190,25 +174,18 @@ export default function AnalysisScreen() {
       <Modal visible={fullscreen} transparent animationType="fade" onRequestClose={() => setFullscreen(false)}>
         <Pressable style={styles.modalBg} onPress={() => setFullscreen(false)}>
           <View style={styles.modalContent}>
-            {displayImageUri ? (
+            {displayImage ? (
               <Image
-                source={{ uri: displayImageUri }}
+                source={{ uri: displayImage }}
                 style={styles.modalImage}
                 resizeMode="contain"
               />
             ) : (
               <View style={[styles.modalImage, styles.cardImagePlaceholder]}>
-                <Text style={styles.cardImagePlaceholderText}>{card.name.charAt(0)}</Text>
+                <Text style={styles.cardImagePlaceholderText}>?</Text>
               </View>
             )}
-
-            {/* Corner dots in full-screen too */}
-            <CornerDot position="topLeft"     color={cornerColors[0]} size={14} />
-            <CornerDot position="topRight"    color={cornerColors[1]} size={14} />
-            <CornerDot position="bottomLeft"  color={cornerColors[2]} size={14} />
-            <CornerDot position="bottomRight" color={cornerColors[3]} size={14} />
           </View>
-
           <Text style={styles.modalClose}>Tap anywhere to close</Text>
         </Pressable>
       </Modal>
@@ -216,61 +193,38 @@ export default function AnalysisScreen() {
   );
 }
 
-// ─── Card identification banner ──────────────────────────────────────────────
+// ─── Subgrade card ────────────────────────────────────────────────────────────
 
-function CardIdentBanner({ ident }: { ident: CardIdentificationResult }) {
-  const details = [ident.rarity, ident.setName, ident.cardNumber]
-    .filter(Boolean)
-    .join(' • ');
-
-  return (
-    <View style={styles.identBanner}>
-      <View style={styles.identBadge}>
-        <Text style={styles.identBadgeText}>{GAME_LABELS[ident.gameType]}</Text>
-      </View>
-      <View style={styles.identInfo}>
-        <Text style={styles.identCardName} numberOfLines={1}>{ident.cardName}</Text>
-        {details ? (
-          <Text style={styles.identDetails} numberOfLines={1}>{details}</Text>
-        ) : null}
-      </View>
-    </View>
-  );
-}
-
-// ─── Corner dot overlay ──────────────────────────────────────────────────────
-
-function CornerDot({
-  position,
-  color,
-  size = 11,
-}: {
-  position: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
-  color: CornerColor;
-  size?: number;
+function SubgradeCard({ label, grade, details, issues, extra }: {
+  label: string; grade: string; details: string; issues: string[]; extra?: string;
 }) {
-  const isTop  = position.startsWith('top');
-  const isLeft = position.endsWith('Left');
-  const bg     = DOT_COLORS[color];
-  const inset  = size * 0.7;
-
+  const g = parseFloat(grade);
+  const color = g >= 9 ? '#00c853' : g >= 7 ? '#ffd600' : '#ff5252';
   return (
-    <View
-      style={[
-        styles.cornerDot,
-        { width: size * 2, height: size * 2, borderRadius: size },
-        { backgroundColor: bg, shadowColor: bg },
-        isTop  ? { top: inset }    : { bottom: inset },
-        isLeft ? { left: inset }   : { right: inset },
-      ]}
-    />
+    <View style={styles.subgradeCard}>
+      <View style={styles.subgradeHeader}>
+        <Text style={styles.subgradeLabel}>{label}</Text>
+        <Text style={[styles.subgradeGrade, { color }]}>{grade}</Text>
+      </View>
+      {extra ? <Text style={styles.subgradeExtra}>{extra}</Text> : null}
+      {details ? <Text style={styles.subgradeDetails}>{details}</Text> : null}
+      {issues.length > 0 && (
+        <View style={styles.issuesList}>
+          {issues.map((issue, i) => (
+            <View key={i} style={styles.issueTag}>
+              <Text style={styles.issueText}>{issue}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
   );
 }
 
 // ─── Grade hero ──────────────────────────────────────────────────────────────
 
-function GradeHero({ grade, confidence, cardName, cardSet }: {
-  grade: number; confidence: number; cardName: string; cardSet: string;
+function GradeHero({ grade, cardName, cardSet }: {
+  grade: number; cardName: string; cardSet: string;
 }) {
   const opacity = useSharedValue(0);
   const scale   = useSharedValue(0.75);
@@ -285,109 +239,18 @@ function GradeHero({ grade, confidence, cardName, cardSet }: {
     transform: [{ scale: scale.value }],
   }));
 
+  const color = gradeColor(grade);
+
   return (
     <Animated.View style={[styles.hero, anim]}>
       <Text style={styles.cardName}>{cardName}</Text>
-      <Text style={styles.cardSet}>{cardSet}</Text>
-      <View style={styles.gradeCircle}>
+      {cardSet ? <Text style={styles.cardSet}>{cardSet}</Text> : null}
+      <View style={[styles.gradeCircle, { borderColor: color }]}>
         <Text style={styles.gradeLabel}>PSA</Text>
-        <Text style={styles.gradeNumber}>{grade}</Text>
+        <Text style={[styles.gradeNumber, { color }]}>{grade}</Text>
       </View>
-      <Text style={styles.confidence}>{confidence}% confidence</Text>
+      <Text style={styles.gradeSubLabel}>AI Estimate</Text>
     </Animated.View>
-  );
-}
-
-// ─── Subgrade row ────────────────────────────────────────────────────────────
-
-function SubGradeRow({ label, value, index }: { label: string; value: number; index: number }) {
-  const progress = useSharedValue(0);
-
-  useEffect(() => {
-    progress.value = withDelay(index * 100, withTiming(value / 10, { duration: 600 }));
-  }, [value]);
-
-  const barStyle = useAnimatedStyle(() => ({
-    width: `${progress.value * 100}%` as any,
-  }));
-
-  const color = gradeColor(value);
-  return (
-    <View style={styles.subGradeRow}>
-      <Text style={styles.subGradeLabel}>{label}</Text>
-      <View style={styles.subGradeBarBg}>
-        <Animated.View style={[styles.subGradeBar, barStyle, { backgroundColor: color }]} />
-      </View>
-      <Text style={[styles.subGradeValue, { color }]}>{value.toFixed(1)}</Text>
-    </View>
-  );
-}
-
-// ─── Centering detail ─────────────────────────────────────────────────────────
-
-function CenteringDetail({ centering }: { centering: CardAnalysis['centering'] }) {
-  const [lr0, lr1] = centering.leftRight;
-  const [tb0, tb1] = centering.topBottom;
-  return (
-    <View>
-      <View style={styles.centeringRow}>
-        <Text style={styles.centeringLabel}>Left / Right</Text>
-        <Text style={styles.centeringValue}>
-          <Text style={styles.centeringNum}>{lr0}</Text>
-          <Text style={styles.centeringSlash}>/</Text>
-          <Text style={styles.centeringNum}>{lr1}</Text>
-        </Text>
-      </View>
-      <View style={styles.centeringRow}>
-        <Text style={styles.centeringLabel}>Top / Bottom</Text>
-        <Text style={styles.centeringValue}>
-          <Text style={styles.centeringNum}>{tb0}</Text>
-          <Text style={styles.centeringSlash}>/</Text>
-          <Text style={styles.centeringNum}>{tb1}</Text>
-        </Text>
-      </View>
-      <View style={styles.psaStds}>
-        <Text style={styles.psaStdTitle}>PSA Standards</Text>
-        <Text style={styles.psaStd}>10 = 55/45  ·  9 = 60/40  ·  8 = 65/35</Text>
-      </View>
-    </View>
-  );
-}
-
-// ─── Probability bar ──────────────────────────────────────────────────────────
-
-function ProbabilityBar({ probs }: { probs: { grade: number; pct: number }[] }) {
-  return (
-    <View>
-      <View style={styles.probBar}>
-        {probs.map((p) => (
-          <View
-            key={p.grade}
-            style={[styles.probSegment, { width: `${p.pct}%` as any, backgroundColor: gradeColor(p.grade) }]}
-          />
-        ))}
-      </View>
-      <View style={styles.probLabels}>
-        {probs.map((p) => (
-          <View key={p.grade} style={styles.probLabelItem}>
-            <View style={[styles.probDot, { backgroundColor: gradeColor(p.grade) }]} />
-            <Text style={styles.probLabelText}>PSA {p.grade}</Text>
-            <Text style={styles.probPct}>{p.pct}%</Text>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-// ─── Market card ──────────────────────────────────────────────────────────────
-
-function MarketCard({ label, value, isRoi }: { label: string; value: string; isRoi: boolean }) {
-  return (
-    <View style={[styles.marketCard, isRoi && styles.marketCardRoi]}>
-      <Text style={styles.marketLabel}>{label}</Text>
-      <Text style={[styles.marketValue, isRoi && { color: Colors.green }]}>{value}</Text>
-    </View>
   );
 }
 
@@ -519,18 +382,10 @@ const styles = StyleSheet.create({
   },
   tapHintText: { color: '#fff', fontFamily: Fonts.regular, fontSize: 10 },
 
-  cornerDot: {
-    position: 'absolute',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.85,
-    shadowRadius: 5,
-    elevation: 4,
-  },
-
-  // ── Grade hero (beside image) ──
+  // ── Grade hero ──
   hero: { flex: 1, alignItems: 'center', paddingTop: 8 },
-  cardName:   { color: Colors.text,          fontFamily: Fonts.bold,    fontSize: 15, textAlign: 'center', marginBottom: 4 },
-  cardSet:    { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12, textAlign: 'center', marginBottom: 14 },
+  cardName:     { color: Colors.text, fontFamily: Fonts.bold, fontSize: 15, textAlign: 'center', marginBottom: 4 },
+  cardSet:      { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12, textAlign: 'center', marginBottom: 14 },
   gradeCircle: {
     width: 80, height: 80, borderRadius: 40,
     backgroundColor: Colors.surface,
@@ -538,9 +393,9 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     marginBottom: 8,
   },
-  gradeLabel:  { color: Colors.textSecondary, fontFamily: Fonts.semiBold, fontSize: 10 },
-  gradeNumber: { color: Colors.gold,          fontFamily: Fonts.bold,    fontSize: 28, lineHeight: 32 },
-  confidence:  { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12 },
+  gradeLabel:    { color: Colors.textSecondary, fontFamily: Fonts.semiBold, fontSize: 10 },
+  gradeNumber:   { color: Colors.gold, fontFamily: Fonts.bold, fontSize: 28, lineHeight: 32 },
+  gradeSubLabel: { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12 },
 
   // ── Sections ──
   section:      { marginTop: 22 },
@@ -550,45 +405,22 @@ const styles = StyleSheet.create({
   },
   sectionBody: {
     backgroundColor: Colors.surface, borderRadius: 12,
-    borderWidth: 1, borderColor: Colors.border, padding: 16,
+    borderWidth: 1, borderColor: Colors.border, padding: 12,
   },
 
-  // ── Subgrades ──
-  subGradeRow:   { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  subGradeLabel: { color: Colors.text, fontFamily: Fonts.regular, fontSize: 14, width: 90 },
-  subGradeBarBg: { flex: 1, height: 6, backgroundColor: Colors.border, borderRadius: 3, overflow: 'hidden', marginHorizontal: 12 },
-  subGradeBar:   { height: '100%', borderRadius: 3 },
-  subGradeValue: { fontFamily: Fonts.bold, fontSize: 14, width: 36, textAlign: 'right' },
+  // ── Subgrade cards ──
+  subgradeCard:   { backgroundColor: '#1a1a2e', borderRadius: 12, padding: 14, marginBottom: 10 },
+  subgradeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  subgradeLabel:  { color: '#aaa', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1 },
+  subgradeGrade:  { fontSize: 22, fontWeight: '800' },
+  subgradeExtra:  { color: '#888', fontSize: 12, marginTop: 2 },
+  subgradeDetails: { color: '#ccc', fontSize: 13, marginTop: 6, lineHeight: 18 },
+  issuesList:     { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6, gap: 4 },
+  issueTag:       { backgroundColor: '#2a1a1a', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  issueText:      { color: '#ff9999', fontSize: 11 },
 
-  // ── Centering ──
-  centeringRow:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.border },
-  centeringLabel: { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 14 },
-  centeringValue: { fontFamily: Fonts.bold, fontSize: 18 },
-  centeringNum:   { color: Colors.gold },
-  centeringSlash: { color: Colors.textSecondary },
-  psaStds:        { marginTop: 12 },
-  psaStdTitle:    { color: Colors.textSecondary, fontFamily: Fonts.semiBold, fontSize: 12, marginBottom: 4 },
-  psaStd:         { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12, lineHeight: 18 },
-
-  // ── Probability ──
-  probBar:       { flexDirection: 'row', height: 24, borderRadius: 12, overflow: 'hidden', gap: 2 },
-  probSegment:   { height: '100%' },
-  probLabels:    { flexDirection: 'row', justifyContent: 'space-around', marginTop: 12 },
-  probLabelItem: { alignItems: 'center', gap: 4 },
-  probDot:       { width: 10, height: 10, borderRadius: 5 },
-  probLabelText: { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12 },
-  probPct:       { color: Colors.text, fontFamily: Fonts.bold, fontSize: 15 },
-
-  // ── Market ──
-  marketGrid:    { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  marketCard: {
-    flex: 1, minWidth: (SCREEN_W - 32 - 32 - 10) / 2,
-    backgroundColor: Colors.background, borderRadius: 10,
-    borderWidth: 1, borderColor: Colors.border, padding: 14, alignItems: 'center',
-  },
-  marketCardRoi: { borderColor: Colors.gold },
-  marketLabel:   { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 12, marginBottom: 6 },
-  marketValue:   { color: Colors.text, fontFamily: Fonts.bold, fontSize: 20 },
+  // ── Overall notes ──
+  overallNotes: { color: Colors.textSecondary, fontFamily: Fonts.regular, fontSize: 14, lineHeight: 20 },
 
   // ── CTA ──
   ctaBtn:     { marginTop: 28, backgroundColor: Colors.gold, borderRadius: 14, paddingVertical: 16, alignItems: 'center' },

@@ -1,4 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -8,70 +11,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { frontImageBase64, backImageBase64, mimeType = 'image/jpeg' } = req.body ?? {};
-  if (!frontImageBase64) return res.status(400).json({ error: 'frontImageBase64 is required' });
+  const { frontImage, backImage } = req.body;
+  if (!frontImage) return res.status(400).json({ error: 'frontImage required' });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'API key not configured' });
-
-  const imageContent: unknown[] = [
-    { type: 'image', source: { type: 'base64', media_type: mimeType, data: frontImageBase64 } }
+  const imageContent: any[] = [
+    { type: 'text', text: 'Front of card:' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frontImage } },
   ];
-
-  if (backImageBase64) {
-    imageContent.push({ type: 'image', source: { type: 'base64', media_type: mimeType, data: backImageBase64 } });
+  if (backImage) {
+    imageContent.push({ type: 'text', text: 'Back of card:' });
+    imageContent.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: backImage } });
   }
-
   imageContent.push({
     type: 'text',
-    text: `You are a strict professional trading card grader with the eye of a PSA/BGS expert. Analyze this card image${backImageBase64 ? ' (front and back)' : ''} and grade each category.
+    text: `You are a professional trading card grader with PSA/BGS expertise. Analyze this card image and grade it strictly.
 
-CORNERS: Look at all 4 corners. Any fuzzing, nicking, or rounding?
-- 10: Perfect sharp points. 9.5: Near perfect under magnification only. 9: Minor issue under magnification. 8.5: Very light wear visible. 8: Light wear visible.
-
-EDGES: Examine all 4 edges. Any chips, fraying, whitening?
-- 10: Perfectly smooth clean cut. 9.5: Nearly perfect. 9: Minor issue under magnification. 8.5: Very slight wear visible. 8: Light wear visible.
-
-SURFACE: Look at the card face. Any scratches, print lines, cloudiness, scuffs?
-- 10: Flawless, perfect gloss, zero marks. 9.5: Only detectable under specific lighting. 9: Minor imperfection. 8.5: Very light surface wear. 8: Light wear visible.
-
-Respond with ONLY a valid JSON object:
+Return ONLY valid JSON with this exact structure:
 {
-  "corners": { "grade": 9.5, "issues": [], "details": "one sentence" },
-  "edges": { "grade": 9.0, "issues": [], "details": "one sentence" },
-  "surface": { "grade": 8.5, "issues": [], "details": "one sentence" },
-  "overallNotes": "Brief expert summary"
+  "centering": {
+    "grade": <number 1-10, use 0.5 increments>,
+    "leftRightRatio": "<e.g. 55/45>",
+    "topBottomRatio": "<e.g. 50/50>",
+    "issues": [<list of centering issues, empty array if none>],
+    "details": "<one sentence explanation of centering assessment>"
+  },
+  "corners": {
+    "grade": <number 1-10, use 0.5 increments>,
+    "issues": [<list of corner issues observed>],
+    "details": "<one sentence describing corner condition>"
+  },
+  "edges": {
+    "grade": <number 1-10, use 0.5 increments>,
+    "issues": [<list of edge issues observed>],
+    "details": "<one sentence describing edge condition>"
+  },
+  "surface": {
+    "grade": <number 1-10, use 0.5 increments>,
+    "issues": [<list of surface issues: scratches, print lines, haze, etc>],
+    "details": "<one sentence describing surface condition>"
+  },
+  "overallNotes": "<2-3 sentence expert assessment of the card overall>"
 }
 
-Use grades in 0.5 increments only. Be honest and strict.`
+Grading scale:
+- 10: Perfect/Gem Mint. Centering 50/50 to 55/45. Corners sharp under magnification. Edges clean. Surface pristine.
+- 9: Mint. Centering up to 60/40. One minor flaw allowed.
+- 8: Near Mint-Mint. Centering up to 65/35. Minor flaws.
+- 7: Near Mint. Centering up to 70/30. Light wear.
+- 6: Excellent-Mint. Centering up to 75/25. Moderate wear.
+- 5 and below: Heavily played, creased, or damaged.
+
+Be strict and realistic. Most cards grade 7-9. Only perfect cards get 10.`,
   });
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-opus-4-5',
-        max_tokens: 600,
-        messages: [{ role: 'user', content: imageContent }],
-      }),
+    const message = await client.messages.create({
+      model: 'claude-opus-4-5',
+      max_tokens: 1024,
+      messages: [{ role: 'user', content: imageContent }],
     });
 
-    const data = await response.json() as { content?: Array<{ text: string }>; error?: unknown };
-    if (!response.ok) return res.status(502).json({ error: 'Upstream error', detail: data });
-
-    let text = (data.content?.[0]?.text ?? '').replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    return res.status(200).json(JSON.parse(text));
-  } catch {
-    return res.status(200).json({
-      corners: { grade: 8.5, issues: [], details: 'Unable to analyze' },
-      edges: { grade: 8.5, issues: [], details: 'Unable to analyze' },
-      surface: { grade: 8.5, issues: [], details: 'Unable to analyze' },
-      overallNotes: 'Analysis unavailable'
-    });
+    const text = (message.content[0] as any).text;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('No JSON in response');
+    const result = JSON.parse(jsonMatch[0]);
+    return res.status(200).json(result);
+  } catch (err: any) {
+    console.error('Grade error:', err);
+    return res.status(500).json({ error: err.message });
   }
 }
