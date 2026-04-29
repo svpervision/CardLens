@@ -124,7 +124,11 @@ export default function AnalysisScreen() {
           <TouchableOpacity activeOpacity={0.9} onPress={() => setFullscreen(true)}>
             <View style={styles.cardImageWrap}>
               {imageUri ? (
-                <Image source={{ uri: imageUri }} style={styles.cardImage} resizeMode="cover" />
+                <CardWithCenteringLines
+                  imageUri={imageUri ?? ''}
+                  centeringRatioLR={centeringRatioLR ?? ''}
+                  centeringRatioTB={centeringRatioTB ?? ''}
+                />
               ) : (
                 <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
                   <Text style={styles.cardImagePlaceholderText}>?</Text>
@@ -236,6 +240,72 @@ function IdentBanner({ cardName, setName, gameType, rarity, cardNumber }: {
         <Text style={styles.identCardName} numberOfLines={1}>{cardName}</Text>
         {details ? <Text style={styles.identDetails} numberOfLines={1}>{details}</Text> : null}
       </View>
+    </View>
+  );
+}
+
+// ─── Centering overlay ────────────────────────────────────────────────────────
+
+function parseRatio(ratio: string): number {
+  if (!ratio) return 0.5;
+  const parts = ratio.split('/');
+  if (parts.length !== 2) return 0.5;
+  const a = parseFloat(parts[0]);
+  const b = parseFloat(parts[1]);
+  if (isNaN(a) || isNaN(b) || a + b === 0) return 0.5;
+  return a / (a + b);
+}
+
+function CardWithCenteringLines({
+  imageUri,
+  centeringRatioLR,
+  centeringRatioTB,
+}: {
+  imageUri: string;
+  centeringRatioLR: string;
+  centeringRatioTB: string;
+}) {
+  const lrPos = parseRatio(centeringRatioLR);
+  const tbPos = parseRatio(centeringRatioTB);
+
+  const W = 220;
+  const H = 308;
+
+  const vLineX = lrPos * W;
+  const hLineY = tbPos * H;
+  const trueX  = W / 2;
+  const trueY  = H / 2;
+
+  const isOffCenter = Math.abs(lrPos - 0.5) > 0.03 || Math.abs(tbPos - 0.5) > 0.03;
+
+  return (
+    <View style={{ width: W, height: H, borderRadius: 8, overflow: 'hidden' }}>
+      <Image source={{ uri: imageUri }} style={{ width: W, height: H }} resizeMode="cover" />
+
+      {/* True center guide lines (white, dim) */}
+      <View style={{ position: 'absolute', top: 0, left: trueX - 0.5, width: 1, height: H, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+      <View style={{ position: 'absolute', top: trueY - 0.5, left: 0, width: W, height: 1, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+
+      {/* Actual centering lines (gold) */}
+      <View style={{ position: 'absolute', top: 0, left: vLineX - 1, width: 2, height: H, backgroundColor: '#FFD700', opacity: 0.85 }} />
+      <View style={{ position: 'absolute', top: hLineY - 1, left: 0, width: W, height: 2, backgroundColor: '#FFD700', opacity: 0.85 }} />
+
+      {/* Dot at intersection */}
+      <View style={{
+        position: 'absolute', top: hLineY - 5, left: vLineX - 5,
+        width: 10, height: 10, borderRadius: 5,
+        backgroundColor: '#FFD700', borderWidth: 1.5, borderColor: '#000',
+      }} />
+
+      {isOffCenter && (
+        <View style={{
+          position: 'absolute', bottom: 6, right: 6,
+          backgroundColor: 'rgba(255,82,82,0.9)', borderRadius: 6,
+          paddingHorizontal: 6, paddingVertical: 2,
+        }}>
+          <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>OFF CENTER</Text>
+        </View>
+      )}
     </View>
   );
 }
