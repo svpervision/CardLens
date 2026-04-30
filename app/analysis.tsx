@@ -265,131 +265,75 @@ function CardCenteringOverlay({
   centeringRatioLR: string;
   centeringRatioTB: string;
 }) {
-  const W = 220;
-  const H = 308;
-
-  const BORDER_H_FRAC = 0.16;
-  const BORDER_V_FRAC = 0.14;
-
-  const totalBorderW = W * BORDER_H_FRAC;
-  const totalBorderH = H * BORDER_V_FRAC;
+  const W = CARD_IMG_W;
+  const H = CARD_IMG_H;
 
   const lrPos = parseRatio(centeringRatioLR);
   const tbPos = parseRatio(centeringRatioTB);
 
-  const leftBorder = lrPos * totalBorderW;
-  const rightBorder = (1 - lrPos) * totalBorderW;
-  const topBorder = tbPos * totalBorderH;
-  const bottomBorder = (1 - tbPos) * totalBorderH;
+  const leftW   = W * 0.13 * lrPos;
+  const rightW  = W * 0.13 * (1 - lrPos);
+  const topH    = H * 0.12 * tbPos;
+  const bottomH = H * 0.12 * (1 - tbPos);
 
-  const artLeft = leftBorder;
-  const artTop = topBorder;
-  const artW = W - leftBorder - rightBorder;
-  const artH = H - topBorder - bottomBorder;
+  const isOffLR = Math.abs(lrPos - 0.5) > 0.05;
+  const isOffTB = Math.abs(tbPos - 0.5) > 0.05;
 
-  const isOffLR = Math.abs(lrPos - 0.5) > 0.03;
-  const isOffTB = Math.abs(tbPos - 0.5) > 0.03;
+  const lrColor = isOffLR ? 'rgba(255, 60, 60, 0.35)' : 'rgba(60, 200, 60, 0.35)';
+  const tbColor = isOffTB ? 'rgba(255, 60, 60, 0.35)' : 'rgba(60, 200, 60, 0.35)';
 
-  const leftLabel = Math.round(lrPos * 100) + '%';
-  const rightLabel = Math.round((1 - lrPos) * 100) + '%';
-  const topLabel = Math.round(tbPos * 100) + '%';
-  const bottomLabel = Math.round((1 - tbPos) * 100) + '%';
+  const leftLabel   = `${Math.round(lrPos * 100)}%`;
+  const rightLabel  = `${Math.round((1 - lrPos) * 100)}%`;
+  const topLabel    = `${Math.round(tbPos * 100)}%`;
+  const bottomLabel = `${Math.round((1 - tbPos) * 100)}%`;
 
   return (
-    <View style={{ width: W, height: H, borderRadius: 8, overflow: 'hidden', position: 'relative' }}>
-      {/* Card image */}
+    <View style={{ width: W, height: H, position: 'relative' }}>
       <Image source={{ uri: imageUri }} style={{ width: W, height: H }} resizeMode="cover" />
 
-      {/* Top edge of artwork */}
+      {/* Left border strip */}
       <View style={{
-        position: 'absolute', top: artTop, left: artLeft,
-        width: artW, height: 1.5,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-      }} />
-      {/* Bottom edge */}
-      <View style={{
-        position: 'absolute', top: artTop + artH, left: artLeft,
-        width: artW, height: 1.5,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-      }} />
-      {/* Left edge */}
-      <View style={{
-        position: 'absolute', top: artTop, left: artLeft,
-        width: 1.5, height: artH,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-      }} />
-      {/* Right edge */}
-      <View style={{
-        position: 'absolute', top: artTop, left: artLeft + artW,
-        width: 1.5, height: artH,
-        backgroundColor: 'rgba(255,255,255,0.9)',
-      }} />
-
-      {/* Left border measurement line */}
-      <View style={{
-        position: 'absolute', top: H * 0.3, left: 0,
-        width: leftBorder, height: 2,
-        backgroundColor: isOffLR ? '#ff5252' : '#00e676',
-      }} />
-      <View style={{
-        position: 'absolute', top: H * 0.3 - 10, left: 2,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1,
+        position: 'absolute', top: 0, left: 0,
+        width: leftW, height: H,
+        backgroundColor: lrColor,
+        justifyContent: 'center', alignItems: 'center',
       }}>
-        <Text style={{ color: '#fff', fontSize: 8, fontWeight: '700' }}>{leftLabel}</Text>
+        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700', transform: [{ rotate: '-90deg' }] }}>
+          {leftLabel}
+        </Text>
       </View>
 
-      {/* Right border measurement line */}
+      {/* Right border strip */}
       <View style={{
-        position: 'absolute', top: H * 0.3, left: artLeft + artW,
-        width: rightBorder, height: 2,
-        backgroundColor: isOffLR ? '#ff5252' : '#00e676',
-      }} />
-      <View style={{
-        position: 'absolute', top: H * 0.3 - 10, left: artLeft + artW + 2,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1,
+        position: 'absolute', top: 0, right: 0,
+        width: rightW, height: H,
+        backgroundColor: lrColor,
+        justifyContent: 'center', alignItems: 'center',
       }}>
-        <Text style={{ color: '#fff', fontSize: 8, fontWeight: '700' }}>{rightLabel}</Text>
+        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700', transform: [{ rotate: '90deg' }] }}>
+          {rightLabel}
+        </Text>
       </View>
 
-      {/* Top border measurement line */}
+      {/* Top border strip (inset between left/right strips) */}
       <View style={{
-        position: 'absolute', top: 0, left: W * 0.5 - 1,
-        width: 2, height: topBorder,
-        backgroundColor: isOffTB ? '#ff5252' : '#00e676',
-      }} />
-      <View style={{
-        position: 'absolute', top: 2, left: W * 0.5 + 4,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1,
+        position: 'absolute', top: 0, left: leftW, right: rightW,
+        height: topH,
+        backgroundColor: tbColor,
+        justifyContent: 'center', alignItems: 'center',
       }}>
-        <Text style={{ color: '#fff', fontSize: 8, fontWeight: '700' }}>{topLabel}</Text>
+        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{topLabel}</Text>
       </View>
 
-      {/* Bottom border measurement line */}
+      {/* Bottom border strip (inset between left/right strips) */}
       <View style={{
-        position: 'absolute', top: artTop + artH, left: W * 0.5 - 1,
-        width: 2, height: bottomBorder,
-        backgroundColor: isOffTB ? '#ff5252' : '#00e676',
-      }} />
-      <View style={{
-        position: 'absolute', top: artTop + artH + 2, left: W * 0.5 + 4,
-        backgroundColor: 'rgba(0,0,0,0.7)',
-        borderRadius: 3, paddingHorizontal: 3, paddingVertical: 1,
+        position: 'absolute', bottom: 0, left: leftW, right: rightW,
+        height: bottomH,
+        backgroundColor: tbColor,
+        justifyContent: 'center', alignItems: 'center',
       }}>
-        <Text style={{ color: '#fff', fontSize: 8, fontWeight: '700' }}>{bottomLabel}</Text>
+        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>{bottomLabel}</Text>
       </View>
-
-      {(isOffLR || isOffTB) && (
-        <View style={{
-          position: 'absolute', bottom: 6, right: 6,
-          backgroundColor: 'rgba(255,82,82,0.9)',
-          borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2,
-        }}>
-          <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }}>OFF CENTER</Text>
-        </View>
-      )}
     </View>
   );
 }
